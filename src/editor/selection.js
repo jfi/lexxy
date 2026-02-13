@@ -116,7 +116,8 @@ export default class Selection {
     }
   }
 
-  // Selection preservation for native bridge dialogs
+  // Selection preservation for native bridge dialogs.
+  // Locks the editor to prevent DOM changes while a dialog is open.
   freeze() {
     this.frozenState = null
     this.editor.getEditorState().read(() => {
@@ -148,48 +149,25 @@ export default class Selection {
         focus: { key: selection.focus.key, offset: selection.focus.offset }
       }
     })
+
+    this.editor.setEditable(false)
   }
 
   thaw() {
     const frozenState = this.frozenState
     this.frozenState = null
+
+    this.editor.setEditable(true)
+
     if (!frozenState) return
 
-    let shouldRestore = false
-    this.editor.getEditorState().read(() => {
-      const anchorNode = $getNodeByKey(frozenState.anchor.key)
-      const focusNode = $getNodeByKey(frozenState.focus.key)
-
-      // Skip if nodes were removed or content was truncated (e.g., text node
-      // split by link creation) — restoring would leave Lexical in a broken state.
-      if (!anchorNode?.isAttached() || !focusNode?.isAttached()) return
-      if (frozenState.anchor.offset > anchorNode.getTextContentSize()) return
-      if (frozenState.focus.offset > focusNode.getTextContentSize()) return
-
-      // Skip if the selection hasn't actually changed — an unnecessary
-      // editor.update() triggers DOM reconciliation that can disrupt Android
-      // WebView's input connection.
+    this.editor.update(() => {
       const selection = $getSelection()
       if ($isRangeSelection(selection)) {
-        shouldRestore =
-          selection.anchor.key !== frozenState.anchor.key ||
-          selection.anchor.offset !== frozenState.anchor.offset ||
-          selection.focus.key !== frozenState.focus.key ||
-          selection.focus.offset !== frozenState.focus.offset
-      } else {
-        shouldRestore = true
+        selection.anchor.set(frozenState.anchor.key, frozenState.anchor.offset, "text")
+        selection.focus.set(frozenState.focus.key, frozenState.focus.offset, "text")
       }
     })
-
-    if (shouldRestore) {
-      this.editor.update(() => {
-        const selection = $getSelection()
-        if ($isRangeSelection(selection)) {
-          selection.anchor.set(frozenState.anchor.key, frozenState.anchor.offset, "text")
-          selection.focus.set(frozenState.focus.key, frozenState.focus.offset, "text")
-        }
-      })
-    }
   }
 
   invalidateFrozenState() {
